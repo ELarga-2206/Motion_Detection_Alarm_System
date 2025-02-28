@@ -1,72 +1,59 @@
-import threading
-import winsound
 import cv2
-import imutils
- 
-cap = cv2.VideoCapture(0)
+import numpy as np
+import pygame
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap = cv2.VideoCapture(1)
 
-_, start_frame = cap.read()
-start_frame = imutils.resize(start_frame, width=500)
-start_frame = cv2.cvtColor(start_frame, cv2.COLOR_BGR2GRAY)
-start_frame = cv2.GaussianBlur(start_frame, (21, 21), 0)
+first_frame = None
 
-alarm = False
-alarm_mode = False
-alarm_counter = 0
+pygame.mixer.init()
 
-
-def beep_alarm():
-    global alarm
-    for _ in range(5):
-        if not alarm_mode:
-            break
-        print("ALARM")
-        winsound.Beep(2500, 1000)
-    alarm = False
-
+sound_playing = False
 
 while True:
-   
-    _, frame = cap.read()
-    frame = imutils.resize(frame, width=500)
+    # Capture frame-by-frame
+    ret, frame = cap.read()
 
-    if alarm_mode:
-        frame_bw = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        frame_bw = cv2.GaussianBlur(frame_bw, (5, 5), 0)
-
-        difference = cv2.absdiff(frame_bw, start_frame)
-        threshold = cv2.threshold(difference, 25, 255, cv2.THRESH_BINARY)[1]
-
-       
-        if threshold.sum() > 300:
-            alarm_counter += 1
-        else:
-            if alarm_counter > 0:
-                alarm_counter -= 1
-
-        
-        cv2.imshow("Cam", threshold)
-        start_frame = frame_bw
-    else:
-        
-        cv2.imshow("Cam", frame)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (21, 21), 0)
+ 
+    if first_frame is None:
+        first_frame = gray
+        continue
+ 
+    frame_delta = cv2.absdiff(first_frame, gray)
+    # Adjust the threshold value here (higher value means less sensitivity)
+    thresh = cv2.threshold(frame_delta, 50, 255, cv2.THRESH_BINARY)[1]
+    thresh = cv2.dilate(thresh, None, iterations=2)
 
     
-    if alarm_counter > 20:
-        if not alarm:
-            alarm = True
-            threading.Thread(target=beep_alarm).start()
+    contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-   
-    key_pressed = cv2.waitKey(30)
-    if key_pressed == ord("t"):
-        alarm_mode = not alarm_mode
-        alarm_counter = 0
-    if key_pressed == ord('q'):
-        alarm_mode = False
+    motion_detected = False
+    for contour in contours:
+        
+        if cv2.contourArea(contour) < 1000:
+            continue
+
+        (x, y, w, h) = cv2.boundingRect(contour)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.putText(frame, "Motion Detected", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        motion_detected = True
+
+    
+    if motion_detected and not sound_playing:
+        pygame.mixer.music.load('alert.wav')
+        pygame.mixer.music.play(-1)
+        sound_playing = True
+
+    if not motion_detected and sound_playing:
+        pygame.mixer.music.stop()
+        sound_playing = False
+
+    cv2.imshow("Motion Detection", frame)
+
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 
